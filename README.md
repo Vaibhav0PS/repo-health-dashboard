@@ -1,4 +1,4 @@
-# GitHub Repository Health Dashboard
+# Repository Health Dashboard
 
 A web-based dashboard utilizing the GitHub REST API to assess repository and organization hygiene. It evaluates open issues, pull request age, branch staleness, and contributor activity to compute a health score.
 
