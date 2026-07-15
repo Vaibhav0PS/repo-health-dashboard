@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Repo health dashboard</title>
+<style>
+  :root {
+    --bg: #f3f4f1;
+    --panel: #ffffff;
+    --ink: #1c231f;
+    --ink-soft: #5b6560;
+    --line: #dcded9;
+    --mono: 'IBM Plex Mono', 'SF Mono', Consolas, monospace;
+    --sans: 'IBM Plex Sans', -apple-system, sans-serif;
+    --add: #1a7f37;
+    --add-bg: #e6f3ea;
+    --del: #cf3d3d;
+    --del-bg: #fbeaea;
+    --amber: #a6690a;
+    --amber-bg: #faf0dd;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    padding: 32px 20px;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; }
+  .masthead {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: 12px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .masthead h1 {
+    font-family: var(--mono);
+    font-size: 20px;
+    font-weight: 600;
+    margin: 0;
+    letter-spacing: -0.02em;
+  }
+  .masthead .sub { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); }
+  .search-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 28px;
+  }
+  .search-row input {
+    flex: 1;
+    font-family: var(--mono);
+    font-size: 14px;
+    padding: 10px 12px;
+    border: 1.5px solid var(--ink);
+    border-radius: 4px;
+    background: var(--panel);
+    color: var(--ink);
+  }
+  .search-row input:focus { outline: none; box-shadow: 0 0 0 2px rgba(28,35,31,0.15); }
+  .search-row button {
+    font-family: var(--mono);
+    font-size: 14px;
+    font-weight: 600;
+    padding: 10px 18px;
+    border: 1.5px solid var(--ink);
+    background: var(--ink);
+    color: var(--bg);
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .search-row button:hover { opacity: 0.85; }
+  .search-row button:disabled { opacity: 0.5; cursor: default; }
+  .hint { font-size: 12px; color: var(--ink-soft); margin: -20px 0 24px; }
+  .hint code { font-family: var(--mono); background: var(--panel); padding: 1px 5px; border-radius: 3px; border: 1px solid var(--line); }
+
+  .status { font-family: var(--mono); font-size: 13px; padding: 10px 12px; border-radius: 4px; margin-bottom: 20px; }
+  .status.error { background: var(--del-bg); color: var(--del); border: 1px solid var(--del); }
+  .status.loading { background: var(--panel); color: var(--ink-soft); border: 1px dashed var(--line); }
+
+  .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 28px; }
+  .metric {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 14px 16px;
+  }
+  .metric .label { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-soft); margin-bottom: 6px; }
+  .metric .value { font-family: var(--mono); font-size: 26px; font-weight: 600; }
+
+  .section { margin-bottom: 28px; }
+  .section h2 {
+    font-family: var(--mono);
+    font-size: 14px;
+    font-weight: 600;
+    margin: 0 0 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .section h2::before { content: '$'; color: var(--ink-soft); }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 16px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; font-family: var(--mono); font-size: 11px; text-transform: uppercase; color: var(--ink-soft); padding: 0 8px 8px; border-bottom: 1px solid var(--line); }
+  td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  .pill { display: inline-block; font-family: var(--mono); font-size: 11px; padding: 2px 8px; border-radius: 10px; }
+  .pill.stale { background: var(--del-bg); color: var(--del); }
+  .pill.old { background: var(--amber-bg); color: var(--amber); }
+  .pill.ok { background: var(--add-bg); color: var(--add); }
+  .empty { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); font-style: italic; }
+  a { color: var(--ink); }
+  .repo-link { font-family: var(--mono); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="masthead">
+    <h1>repo-health</h1>
+    <span class="sub" id="clock"></span>
+  </div>
+
+  <div class="search-row">
+    <input id="repoInput" type="text" placeholder="owner/repo (e.g. facebook/react)" value="">
+    <button id="fetchBtn">git log --health</button>
+  </div>
+  <div class="hint">Uses the public GitHub REST API — no token needed for public repos. Unauthenticated requests are capped at 60/hour, so branch staleness checks are limited to the 12 most recently active branches.</div>
+
+  <div id="statusBox"></div>
+  <div id="dashboard" style="display:none;">
+    <div class="metrics" id="metrics"></div>
+
+    <div class="section">
+      <h2>oldest open pull requests</h2>
+      <div class="panel" id="prPanel"></div>
+    </div>
+
+    <div class="section">
+      <h2>branch staleness</h2>
+      <div class="panel" id="branchPanel"></div>
+    </div>
+
+    <div class="section">
+      <h2>top contributors</h2>
+      <div class="panel">
+        <div style="position: relative; height: 220px;">
+          <canvas id="contribChart" role="img" aria-label="Bar chart of top contributors by commit count"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+document.getElementById('clock').textContent = new Date().toISOString().slice(0,16).replace('T', ' ');
+
+const API = 'https://api.github.com';
+const input = document.getElementById('repoInput');
+const btn = document.getElementById('fetchBtn');
+const statusBox = document.getElementById('statusBox');
+const dashboard = document.getElementById('dashboard');
+let chartInstance = null;
+
+function daysAgo(dateStr) {
+  return Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000);
+}
+
+function setStatus(msg, type) {
+  if (!msg) { statusBox.innerHTML = ''; return; }
+  statusBox.innerHTML = `<div class="status ${type}">${msg}</div>`;
+}
+
+async function ghFetch(path) {
+  let res;
+  try {
+    res = await fetch(`${API}${path}`, { headers: { 'Accept': 'application/vnd.github+json' } });
+  } catch {
+    throw new Error('Network request to the GitHub API failed. Check your connection and try again.');
+  }
+  if (!res.ok) {
+    if (res.status === 403) throw new Error('GitHub API rate limit hit (60 req/hour for unauthenticated requests). Wait a bit and try again.');
+    if (res.status === 404) throw new Error('Repo not found. Check the owner/repo spelling.');
+    throw new Error(`GitHub API error: ${res.status}`);
+  }
+  return res.json();
+}
+
+function parseSlug(raw) {
+  let s = raw.trim();
+  s = s.replace(/^git@github\.com:/, '');
+  s = s.replace(/^https?:\/\/(www\.)?github\.com\//i, '');
+  s = s.replace(/\.git$/i, '');
+  s = s.replace(/^\/+|\/+$/g, '');
+  const parts = s.split('/').filter(Boolean);
+  if (parts.length < 2) return null;
+  return `${parts[0]}/${parts[1]}`;
+}
+
+async function loadRepo() {
+  const slug = parseSlug(input.value);
+  if (!slug) {
+    setStatus('Enter a repo as owner/repo, or paste a full GitHub URL, like torvalds/linux or https://github.com/torvalds/linux.', 'error');
+    return;
+  }
+  btn.disabled = true;
+  dashboard.style.display = 'none';
+  setStatus('Fetching repo data…', 'loading');
+
+  try {
+    const [repo, issues, pulls, contributors, branches] = await Promise.all([
+      ghFetch(`/repos/${slug}`),
+      ghFetch(`/repos/${slug}/issues?state=open&per_page=100`),
+      ghFetch(`/repos/${slug}/pulls?state=open&per_page=100&sort=created&direction=asc`),
+      ghFetch(`/repos/${slug}/contributors?per_page=10`).catch(() => []),
+      ghFetch(`/repos/${slug}/branches?per_page=100`).catch(() => [])
+    ]);
+
+    const realIssues = issues.filter(i => !i.pull_request);
+
+    setStatus('', null);
+    dashboard.style.display = 'block';
+
+    // metrics
+    const metrics = document.getElementById('metrics');
+    metrics.innerHTML = `
+      <div class="metric"><div class="label">Stars</div><div class="value">${repo.stargazers_count.toLocaleString()}</div></div>
+      <div class="metric"><div class="label">Open issues</div><div class="value">${realIssues.length}</div></div>
+      <div class="metric"><div class="label">Open PRs</div><div class="value">${pulls.length}</div></div>
+      <div class="metric"><div class="label">Contributors shown</div><div class="value">${contributors.length}${contributors.length === 10 ? '+' : ''}</div></div>
+    `;
+
+    // PR ages
+    const prPanel = document.getElementById('prPanel');
+    if (pulls.length === 0) {
+      prPanel.innerHTML = '<div class="empty">No open pull requests.</div>';
+    } else {
+      const sorted = [...pulls].sort((a, b) => daysAgo(b.created_at) - daysAgo(a.created_at)).slice(0, 8);
+      const avgAge = Math.round(pulls.reduce((s, p) => s + daysAgo(p.created_at), 0) / pulls.length);
+      prPanel.innerHTML = `
+        <table>
+          <tr><th>PR</th><th>Author</th><th>Age</th></tr>
+          ${sorted.map(p => {
+            const age = daysAgo(p.created_at);
+            const cls = age > 90 ? 'stale' : age > 30 ? 'old' : 'ok';
+            return `<tr>
+              <td><a href="${p.html_url}" target="_blank" rel="noopener">#${p.number}</a> ${escapeHtml(p.title).slice(0,60)}</td>
+              <td>${p.user ? escapeHtml(p.user.login) : '—'}</td>
+              <td><span class="pill ${cls}">${age}d</span></td>
+            </tr>`;
+          }).join('')}
+        </table>
+        <div style="margin-top:10px; font-family: var(--mono); font-size: 12px; color: var(--ink-soft);">avg age across all ${pulls.length} open PRs: ${avgAge}d</div>
+      `;
+    }
+
+    // branch staleness (check up to 12 branches, skip default branch)
+    const branchPanel = document.getElementById('branchPanel');
+    const toCheck = branches.filter(b => b.name !== repo.default_branch).slice(0, 12);
+    if (toCheck.length === 0) {
+      branchPanel.innerHTML = '<div class="empty">No non-default branches found (or branch data unavailable).</div>';
+    } else {
+      branchPanel.innerHTML = '<div class="empty">Checking last commit date on each branch…</div>';
+      const results = await Promise.all(toCheck.map(async b => {
+        try {
+          const commits = await ghFetch(`/repos/${slug}/commits?sha=${encodeURIComponent(b.name)}&per_page=1`);
+          const date = commits[0] && commits[0].commit && commits[0].commit.committer ? commits[0].commit.committer.date : null;
+          return { name: b.name, days: date ? daysAgo(date) : null };
+        } catch { return { name: b.name, days: null }; }
+      }));
+      const withData = results.filter(r => r.days !== null).sort((a, b) => b.days - a.days);
+      branchPanel.innerHTML = `
+        <table>
+          <tr><th>Branch</th><th>Last commit</th></tr>
+          ${withData.map(r => {
+            const cls = r.days > 90 ? 'stale' : r.days > 30 ? 'old' : 'ok';
+            return `<tr><td>${escapeHtml(r.name)}</td><td><span class="pill ${cls}">${r.days}d ago</span></td></tr>`;
+          }).join('')}
+        </table>
+        ${branches.length > toCheck.length + 1 ? `<div style="margin-top:10px; font-family: var(--mono); font-size: 12px; color: var(--ink-soft);">showing ${toCheck.length} of ${branches.length - 1} non-default branches</div>` : ''}
+      `;
+    }
+
+    // contributors chart
+    if (chartInstance) chartInstance.destroy();
+    const ctx = document.getElementById('contribChart');
+    if (contributors.length === 0) {
+      ctx.parentElement.innerHTML = '<div class="empty">Contributor data unavailable.</div>';
+    } else {
+      chartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: contributors.map(c => c.login),
+          datasets: [{ label: 'Commits', data: contributors.map(c => c.contributions), backgroundColor: '#1a7f37', borderRadius: 3, maxBarThickness: 28 }]
+        },
+        options: {
+          indexAxis: 'y',
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { grid: { color: '#e1e0d9' }, ticks: { color: '#5b6560' } },
+            y: { grid: { display: false }, ticks: { color: '#1c231f', font: { family: 'IBM Plex Mono', size: 11 } } }
+          }
+        }
+      });
+    }
+
+  } catch (err) {
+    setStatus(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+btn.addEventListener('click', loadRepo);
+input.addEventListener('keydown', e => { if (e.key === 'Enter') loadRepo(); });
+</script>
+</body>
+</html>

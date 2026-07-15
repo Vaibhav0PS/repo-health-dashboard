@@ -1,0 +1,808 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Repo health dashboard</title>
+<style>
+  :root {
+    --bg: #f5f5f2;
+    --panel: #ffffff;
+    --ink: #1b2320;
+    --ink-soft: #5e6863;
+    --line: #d9ddd7;
+    --mono: "IBM Plex Mono", "SF Mono", Consolas, monospace;
+    --sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --add: #18733c;
+    --add-bg: #e5f3eb;
+    --del: #c93f3f;
+    --del-bg: #f9e9e9;
+    --amber: #9a650d;
+    --amber-bg: #faefd9;
+    --blue: #27649a;
+    --blue-bg: #e5eff8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    padding: 28px 18px 44px;
+  }
+  .wrap { max-width: 1120px; margin: 0 auto; }
+  .masthead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: 12px;
+    margin-bottom: 18px;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  h1 {
+    font-family: var(--mono);
+    font-size: 20px;
+    font-weight: 650;
+    margin: 0;
+  }
+  .sub { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); }
+  .auth {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  .toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .mode-tabs {
+    display: inline-grid;
+    grid-template-columns: 1fr 1fr;
+    border: 1.5px solid var(--ink);
+    border-radius: 6px;
+    overflow: hidden;
+    width: 240px;
+    background: var(--panel);
+  }
+  .mode-tabs button {
+    border: 0;
+    background: transparent;
+    color: var(--ink);
+    border-radius: 0;
+    padding: 10px 12px;
+  }
+  .mode-tabs button.active { background: var(--ink); color: var(--bg); }
+  .search-row {
+    display: flex;
+    gap: 8px;
+    min-width: 0;
+  }
+  input {
+    width: 100%;
+    font-family: var(--mono);
+    font-size: 14px;
+    padding: 10px 12px;
+    border: 1.5px solid var(--ink);
+    border-radius: 4px;
+    background: var(--panel);
+    color: var(--ink);
+  }
+  input:focus { outline: none; box-shadow: 0 0 0 2px rgba(27,35,32,0.14); }
+  button {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 650;
+    padding: 10px 14px;
+    border: 1.5px solid var(--ink);
+    background: var(--ink);
+    color: var(--bg);
+    border-radius: 4px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  button.secondary { background: var(--panel); color: var(--ink); }
+  button:hover { opacity: 0.86; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .hint {
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--ink-soft);
+    margin: 0 0 18px;
+  }
+  .hint code {
+    font-family: var(--mono);
+    background: var(--panel);
+    padding: 1px 5px;
+    border-radius: 3px;
+    border: 1px solid var(--line);
+  }
+  .status {
+    font-family: var(--mono);
+    font-size: 13px;
+    padding: 10px 12px;
+    border-radius: 4px;
+    margin-bottom: 18px;
+  }
+  .status.error { background: var(--del-bg); color: var(--del); border: 1px solid var(--del); }
+  .status.loading { background: var(--panel); color: var(--ink-soft); border: 1px dashed var(--line); }
+  .status.ok { background: var(--add-bg); color: var(--add); border: 1px solid var(--add); }
+  progress {
+    display: block;
+    width: 100%;
+    height: 10px;
+    margin-top: 10px;
+    accent-color: var(--ink);
+  }
+  .metrics {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  .metric {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 14px 16px;
+    min-width: 0;
+  }
+  .metric .label {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--ink-soft);
+    margin-bottom: 6px;
+  }
+  .metric .value {
+    font-family: var(--mono);
+    font-size: 25px;
+    font-weight: 650;
+    overflow-wrap: anywhere;
+  }
+  .section { margin-bottom: 24px; }
+  .section h2 {
+    font-family: var(--mono);
+    font-size: 14px;
+    font-weight: 650;
+    margin: 0 0 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .section h2::before { content: "$"; color: var(--ink-soft); }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 16px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th {
+    text-align: left;
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    padding: 0 8px 8px;
+    border-bottom: 1px solid var(--line);
+  }
+  td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  .pill {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+  }
+  .pill.stale { background: var(--del-bg); color: var(--del); }
+  .pill.old { background: var(--amber-bg); color: var(--amber); }
+  .pill.ok { background: var(--add-bg); color: var(--add); }
+  .pill.info { background: var(--blue-bg); color: var(--blue); }
+  .empty { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); font-style: italic; }
+  a { color: var(--ink); }
+  .repo-name { font-family: var(--mono); }
+  .chart-shell { position: relative; height: 260px; }
+  @media (max-width: 820px) {
+    body { padding: 18px 12px 34px; }
+    .toolbar { grid-template-columns: 1fr; }
+    .mode-tabs { width: 100%; }
+    .search-row { flex-direction: column; }
+    .metrics { grid-template-columns: repeat(2, 1fr); }
+    table { font-size: 12px; }
+  }
+  @media (max-width: 520px) {
+    .metrics { grid-template-columns: 1fr; }
+    .auth { justify-content: flex-start; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="masthead">
+    <div>
+      <h1>repo-health</h1>
+      <span class="sub" id="clock"></span>
+    </div>
+    <div class="auth">
+      <span class="sub" id="authState">anonymous: 60 req/hour</span>
+      <button id="signInBtn" class="secondary">Sign in with GitHub</button>
+      <button id="signOutBtn" class="secondary" style="display:none;">Sign out</button>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <div class="search-row">
+      <input id="targetInput" type="text" placeholder="owner/repo (e.g. facebook/react)">
+      <button id="fetchBtn">scan</button>
+    </div>
+    <div class="mode-tabs" aria-label="Dashboard mode">
+      <button id="repoModeBtn" class="active" type="button">repo</button>
+      <button id="orgModeBtn" type="button">org</button>
+    </div>
+  </div>
+  <p class="hint" id="modeHint">
+    Repo mode accepts <code>owner/repo</code> or a GitHub URL. Sign in to use authenticated requests and raise the REST API limit from 60/hour to 5,000/hour.
+  </p>
+
+  <div id="statusBox"></div>
+  <div id="dashboard" style="display:none;">
+    <div class="metrics" id="metrics"></div>
+
+    <div class="section">
+      <h2 id="prTitle">oldest open pull requests</h2>
+      <div class="panel" id="prPanel"></div>
+    </div>
+
+    <div class="section">
+      <h2 id="branchTitle">branch staleness</h2>
+      <div class="panel" id="branchPanel"></div>
+    </div>
+
+    <div class="section">
+      <h2 id="contribTitle">top contributors</h2>
+      <div class="panel" id="contribPanel">
+        <div class="chart-shell">
+          <canvas id="contribChart" role="img" aria-label="Bar chart of top contributors by commit count"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+const API = "https://api.github.com";
+const OAUTH_CLIENT_ID = "REPLACE_WITH_YOUR_GITHUB_OAUTH_CLIENT_ID";
+const OAUTH_SCOPE = "public_repo";
+const ORG_REPO_CONCURRENCY = 4;
+const AUTH_BRANCH_LIMIT = 20;
+const ANON_BRANCH_LIMIT = 8;
+
+const clock = document.getElementById("clock");
+const targetInput = document.getElementById("targetInput");
+const fetchBtn = document.getElementById("fetchBtn");
+const repoModeBtn = document.getElementById("repoModeBtn");
+const orgModeBtn = document.getElementById("orgModeBtn");
+const modeHint = document.getElementById("modeHint");
+const statusBox = document.getElementById("statusBox");
+const dashboard = document.getElementById("dashboard");
+const signInBtn = document.getElementById("signInBtn");
+const signOutBtn = document.getElementById("signOutBtn");
+const authState = document.getElementById("authState");
+const metrics = document.getElementById("metrics");
+const prPanel = document.getElementById("prPanel");
+const branchPanel = document.getElementById("branchPanel");
+const contribPanel = document.getElementById("contribPanel");
+
+let mode = "repo";
+let chartInstance = null;
+let token = sessionStorage.getItem("github_token") || "";
+let currentUser = JSON.parse(sessionStorage.getItem("github_user") || "null");
+
+clock.textContent = new Date().toISOString().slice(0, 16).replace("T", " ");
+updateAuthUi();
+handleOAuthCallback();
+
+function daysAgo(dateStr) {
+  return Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000);
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+}
+
+function fmt(n) {
+  return Number(n || 0).toLocaleString();
+}
+
+function setStatus(msg, type = "loading", progress = null) {
+  if (!msg) {
+    statusBox.innerHTML = "";
+    return;
+  }
+  const bar = progress ? `<progress max="${progress.total}" value="${progress.done}"></progress>` : "";
+  statusBox.innerHTML = `<div class="status ${type}">${escapeHtml(msg)}${bar}</div>`;
+}
+
+function setMode(nextMode) {
+  mode = nextMode;
+  repoModeBtn.classList.toggle("active", mode === "repo");
+  orgModeBtn.classList.toggle("active", mode === "org");
+  targetInput.placeholder = mode === "repo" ? "owner/repo (e.g. facebook/react)" : "org name (e.g. vercel)";
+  fetchBtn.textContent = mode === "repo" ? "scan repo" : "scan org";
+  modeHint.innerHTML = mode === "repo"
+    ? 'Repo mode accepts <code>owner/repo</code> or a GitHub URL. Sign in to use authenticated requests and raise the REST API limit from 60/hour to 5,000/hour.'
+    : 'Org mode fetches every repo with <code>GET /orgs/{org}/repos</code>, then scans repos in small batches. Large orgs can take a while and use many requests.';
+}
+
+function parseRepoSlug(raw) {
+  let s = raw.trim();
+  s = s.replace(/^git@github\.com:/, "");
+  s = s.replace(/^https?:\/\/(www\.)?github\.com\//i, "");
+  s = s.replace(/\.git$/i, "");
+  s = s.replace(/^\/+|\/+$/g, "");
+  const parts = s.split("/").filter(Boolean);
+  if (parts.length < 2) return null;
+  return `${parts[0]}/${parts[1]}`;
+}
+
+function parseOrg(raw) {
+  let s = raw.trim();
+  s = s.replace(/^https?:\/\/(www\.)?github\.com\//i, "");
+  s = s.replace(/^\/+|\/+$/g, "");
+  return s.split("/").filter(Boolean)[0] || "";
+}
+
+function authHeaders() {
+  const headers = {
+    "Accept": "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28"
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+}
+
+async function ghFetch(path) {
+  let res;
+  try {
+    res = await fetch(`${API}${path}`, { headers: authHeaders() });
+  } catch {
+    throw new Error("Network request to the GitHub API failed. Check your connection and try again.");
+  }
+  if (!res.ok) {
+    const remaining = res.headers.get("x-ratelimit-remaining");
+    if (res.status === 401) {
+      signOut();
+      throw new Error("GitHub rejected the saved token. Sign in again and retry.");
+    }
+    if ((res.status === 403 || res.status === 429) && remaining === "0") {
+      throw new Error("GitHub API rate limit hit. Sign in or wait for the current rate window to reset.");
+    }
+    if (res.status === 404) throw new Error("GitHub resource not found. Check the spelling and permissions.");
+    let detail = "";
+    try {
+      const body = await res.json();
+      detail = body.message ? `: ${body.message}` : "";
+    } catch {}
+    throw new Error(`GitHub API error ${res.status}${detail}`);
+  }
+  const data = await res.json();
+  data.__link = res.headers.get("link") || "";
+  data.__rateRemaining = res.headers.get("x-ratelimit-remaining");
+  return data;
+}
+
+async function ghFetchPaged(path, maxPages = Infinity) {
+  const out = [];
+  let page = 1;
+  while (page <= maxPages) {
+    const sep = path.includes("?") ? "&" : "?";
+    const batch = await ghFetch(`${path}${sep}per_page=100&page=${page}`);
+    out.push(...batch);
+    if (!hasNext(batch.__link) || batch.length === 0) break;
+    page += 1;
+  }
+  return out;
+}
+
+function hasNext(link) {
+  return /rel="next"/.test(link || "");
+}
+
+function countFromLink(items) {
+  const link = items.__link || "";
+  const match = link.match(/[?&]page=(\d+)>;\s*rel="last"/);
+  if (match) return Number(match[1]);
+  return items.length;
+}
+
+async function getOpenPullSummary(slug, oldestLimit = 8) {
+  const [countProbe, pulls] = await Promise.all([
+    ghFetch(`/repos/${slug}/pulls?state=open&per_page=1`),
+    ghFetch(`/repos/${slug}/pulls?state=open&sort=created&direction=asc&per_page=${oldestLimit}`)
+  ]);
+  return { count: countFromLink(countProbe), oldest: pulls.slice(0, oldestLimit) };
+}
+
+async function getBranchStaleness(repo, limit) {
+  const branches = await ghFetch(`/repos/${repo.full_name}/branches?per_page=100`).catch(() => []);
+  const toCheck = branches.filter(b => b.name !== repo.default_branch).slice(0, limit);
+  const rows = await mapLimit(toCheck, 4, async branch => {
+    try {
+      const commits = await ghFetch(`/repos/${repo.full_name}/commits?sha=${encodeURIComponent(branch.name)}&per_page=1`);
+      const date = commits[0]?.commit?.committer?.date || commits[0]?.commit?.author?.date;
+      return date ? { repo: repo.full_name, branch: branch.name, days: daysAgo(date) } : null;
+    } catch {
+      return null;
+    }
+  });
+  const valid = rows.filter(Boolean);
+  return {
+    checked: toCheck.length,
+    totalNonDefault: Math.max(0, branches.length - 1),
+    staleCount: valid.filter(r => r.days > 90).length,
+    oldest: valid.sort((a, b) => b.days - a.days)
+  };
+}
+
+async function getContributors(slug, limit = 10) {
+  return ghFetch(`/repos/${slug}/contributors?per_page=${limit}`).catch(() => []);
+}
+
+async function loadRepo() {
+  const slug = parseRepoSlug(targetInput.value);
+  if (!slug) {
+    setStatus("Enter a repo as owner/repo, or paste a full GitHub URL, like torvalds/linux.", "error");
+    return;
+  }
+  fetchBtn.disabled = true;
+  dashboard.style.display = "none";
+  setStatus(`Fetching ${slug}...`, "loading");
+
+  try {
+    const [repo, pullSummary, contributors] = await Promise.all([
+      ghFetch(`/repos/${slug}`),
+      getOpenPullSummary(slug, 100),
+      getContributors(slug, 10)
+    ]);
+    const branchLimit = token ? AUTH_BRANCH_LIMIT : ANON_BRANCH_LIMIT;
+    setStatus(`Checking up to ${branchLimit} non-default branches...`, "loading");
+    const branchSummary = await getBranchStaleness(repo, branchLimit);
+    const openIssueCount = Math.max(0, repo.open_issues_count - pullSummary.count);
+    renderRepo({
+      repo,
+      openIssueCount,
+      openPrCount: pullSummary.count,
+      pulls: pullSummary.oldest,
+      branchSummary,
+      contributors
+    });
+    setStatus("", "ok");
+  } catch (err) {
+    setStatus(err.message, "error");
+  } finally {
+    fetchBtn.disabled = false;
+  }
+}
+
+async function loadOrg() {
+  const org = parseOrg(targetInput.value);
+  if (!org) {
+    setStatus("Enter a GitHub organization name, like vercel or microsoft.", "error");
+    return;
+  }
+  fetchBtn.disabled = true;
+  dashboard.style.display = "none";
+  setStatus(`Fetching repositories for ${org}...`, "loading");
+
+  try {
+    const repos = await ghFetchPaged(`/orgs/${encodeURIComponent(org)}/repos?type=all&sort=pushed&direction=desc`);
+    if (repos.length === 0) {
+      setStatus(`No repositories found for ${org}.`, "error");
+      return;
+    }
+
+    const totals = {
+      repos: repos.length,
+      stars: repos.reduce((sum, repo) => sum + repo.stargazers_count, 0),
+      openIssues: 0,
+      openPrs: 0,
+      oldestPrs: [],
+      staleRepos: [],
+      contributors: new Map(),
+      branchesChecked: 0
+    };
+    let done = 0;
+    const branchLimit = token ? AUTH_BRANCH_LIMIT : ANON_BRANCH_LIMIT;
+
+    await mapLimit(repos, ORG_REPO_CONCURRENCY, async repo => {
+      const slug = repo.full_name;
+      const [pullSummary, branchSummary, contributors] = await Promise.all([
+        getOpenPullSummary(slug, 5).catch(() => ({ count: 0, oldest: [] })),
+        getBranchStaleness(repo, branchLimit).catch(() => ({ checked: 0, totalNonDefault: 0, staleCount: 0, oldest: [] })),
+        getContributors(slug, 10)
+      ]);
+
+      totals.openPrs += pullSummary.count;
+      totals.openIssues += Math.max(0, repo.open_issues_count - pullSummary.count);
+      totals.oldestPrs.push(...pullSummary.oldest.map(pr => ({ ...pr, repo: slug })));
+      totals.branchesChecked += branchSummary.checked;
+      totals.staleRepos.push({
+        repo: slug,
+        staleCount: branchSummary.staleCount,
+        checked: branchSummary.checked,
+        totalNonDefault: branchSummary.totalNonDefault,
+        oldest: branchSummary.oldest[0] || null,
+        pushedAt: repo.pushed_at
+      });
+      contributors.forEach(c => {
+        const prev = totals.contributors.get(c.login) || { login: c.login, contributions: 0, html_url: c.html_url };
+        prev.contributions += c.contributions;
+        totals.contributors.set(c.login, prev);
+      });
+      done += 1;
+      setStatus(`Scanned ${done}/${repos.length} repos. GitHub calls are batched at ${ORG_REPO_CONCURRENCY} repos at a time.`, "loading", { done, total: repos.length });
+    });
+
+    renderOrg(org, totals);
+    setStatus(`Finished scanning ${repos.length} repos for ${org}.`, "ok");
+  } catch (err) {
+    setStatus(err.message, "error");
+  } finally {
+    fetchBtn.disabled = false;
+  }
+}
+
+function renderRepo(data) {
+  dashboard.style.display = "block";
+  document.getElementById("prTitle").textContent = "oldest open pull requests";
+  document.getElementById("branchTitle").textContent = "branch staleness";
+  document.getElementById("contribTitle").textContent = "top contributors";
+  metrics.innerHTML = `
+    <div class="metric"><div class="label">Stars</div><div class="value">${fmt(data.repo.stargazers_count)}</div></div>
+    <div class="metric"><div class="label">Open issues</div><div class="value">${fmt(data.openIssueCount)}</div></div>
+    <div class="metric"><div class="label">Open PRs</div><div class="value">${fmt(data.openPrCount)}</div></div>
+    <div class="metric"><div class="label">Branches checked</div><div class="value">${fmt(data.branchSummary.checked)}</div></div>
+  `;
+  renderPulls(data.pulls, false);
+  renderBranches(data.branchSummary.oldest, data.branchSummary, false);
+  renderContributors(data.contributors);
+}
+
+function renderOrg(org, totals) {
+  dashboard.style.display = "block";
+  document.getElementById("prTitle").textContent = "oldest open pull requests org-wide";
+  document.getElementById("branchTitle").textContent = "repos with stale branches";
+  document.getElementById("contribTitle").textContent = "most active contributors org-wide";
+  metrics.innerHTML = `
+    <div class="metric"><div class="label">Repos scanned</div><div class="value">${fmt(totals.repos)}</div></div>
+    <div class="metric"><div class="label">Open issues</div><div class="value">${fmt(totals.openIssues)}</div></div>
+    <div class="metric"><div class="label">Open PRs</div><div class="value">${fmt(totals.openPrs)}</div></div>
+    <div class="metric"><div class="label">Branches checked</div><div class="value">${fmt(totals.branchesChecked)}</div></div>
+  `;
+  const oldest = totals.oldestPrs
+    .sort((a, b) => daysAgo(b.created_at) - daysAgo(a.created_at))
+    .slice(0, 12);
+  renderPulls(oldest, true);
+  renderStaleRepos(totals.staleRepos);
+  renderContributors([...totals.contributors.values()].sort((a, b) => b.contributions - a.contributions).slice(0, 12));
+}
+
+function renderPulls(pulls, showRepo) {
+  if (pulls.length === 0) {
+    prPanel.innerHTML = '<div class="empty">No open pull requests found.</div>';
+    return;
+  }
+  prPanel.innerHTML = `
+    <table>
+      <tr>${showRepo ? "<th>Repo</th>" : ""}<th>PR</th><th>Author</th><th>Age</th></tr>
+      ${pulls.map(p => {
+        const age = daysAgo(p.created_at);
+        const cls = age > 90 ? "stale" : age > 30 ? "old" : "ok";
+        return `<tr>
+          ${showRepo ? `<td class="repo-name">${escapeHtml(p.repo)}</td>` : ""}
+          <td><a href="${p.html_url}" target="_blank" rel="noopener">#${p.number}</a> ${escapeHtml(p.title).slice(0, 72)}</td>
+          <td>${p.user ? escapeHtml(p.user.login) : "-"}</td>
+          <td><span class="pill ${cls}">${age}d</span></td>
+        </tr>`;
+      }).join("")}
+    </table>
+  `;
+}
+
+function renderBranches(rows, summary, showRepo) {
+  if (rows.length === 0) {
+    branchPanel.innerHTML = '<div class="empty">No non-default branch data found.</div>';
+    return;
+  }
+  branchPanel.innerHTML = `
+    <table>
+      <tr>${showRepo ? "<th>Repo</th>" : ""}<th>Branch</th><th>Last commit</th></tr>
+      ${rows.slice(0, 12).map(r => {
+        const cls = r.days > 90 ? "stale" : r.days > 30 ? "old" : "ok";
+        return `<tr>
+          ${showRepo ? `<td class="repo-name">${escapeHtml(r.repo)}</td>` : ""}
+          <td>${escapeHtml(r.branch)}</td>
+          <td><span class="pill ${cls}">${r.days}d ago</span></td>
+        </tr>`;
+      }).join("")}
+    </table>
+    <div style="margin-top:10px;" class="empty">checked ${summary.checked} of ${summary.totalNonDefault} non-default branches</div>
+  `;
+}
+
+function renderStaleRepos(rows) {
+  const ranked = rows
+    .filter(r => r.checked > 0)
+    .sort((a, b) => b.staleCount - a.staleCount || ((b.oldest?.days || 0) - (a.oldest?.days || 0)))
+    .slice(0, 12);
+  if (ranked.length === 0) {
+    branchPanel.innerHTML = '<div class="empty">No branch staleness data found.</div>';
+    return;
+  }
+  branchPanel.innerHTML = `
+    <table>
+      <tr><th>Repo</th><th>Stale branches</th><th>Oldest checked branch</th><th>Coverage</th></tr>
+      ${ranked.map(r => `
+        <tr>
+          <td class="repo-name">${escapeHtml(r.repo)}</td>
+          <td><span class="pill ${r.staleCount > 0 ? "stale" : "ok"}">${r.staleCount}</span></td>
+          <td>${r.oldest ? `${escapeHtml(r.oldest.branch)} <span class="pill ${r.oldest.days > 90 ? "stale" : r.oldest.days > 30 ? "old" : "ok"}">${r.oldest.days}d</span>` : "-"}</td>
+          <td><span class="pill info">${r.checked}/${r.totalNonDefault}</span></td>
+        </tr>
+      `).join("")}
+    </table>
+  `;
+}
+
+function renderContributors(contributors) {
+  if (chartInstance) chartInstance.destroy();
+  contribPanel.innerHTML = '<div class="chart-shell"><canvas id="contribChart" role="img" aria-label="Bar chart of top contributors by commit count"></canvas></div>';
+  if (!contributors || contributors.length === 0 || !window.Chart) {
+    contribPanel.innerHTML = '<div class="empty">Contributor data unavailable.</div>';
+    return;
+  }
+  chartInstance = new Chart(document.getElementById("contribChart"), {
+    type: "bar",
+    data: {
+      labels: contributors.map(c => c.login),
+      datasets: [{
+        label: "Commits",
+        data: contributors.map(c => c.contributions),
+        backgroundColor: "#18733c",
+        borderRadius: 3,
+        maxBarThickness: 28
+      }]
+    },
+    options: {
+      indexAxis: "y",
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { color: "#e2e4df" }, ticks: { color: "#5e6863" } },
+        y: { grid: { display: false }, ticks: { color: "#1b2320", font: { family: "IBM Plex Mono", size: 11 } } }
+      }
+    }
+  });
+}
+
+async function mapLimit(items, limit, worker) {
+  const results = new Array(items.length);
+  let next = 0;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await worker(items[index], index);
+    }
+  });
+  await Promise.all(runners);
+  return results;
+}
+
+async function signIn() {
+  if (!OAUTH_CLIENT_ID || OAUTH_CLIENT_ID.startsWith("REPLACE_")) {
+    setStatus("Set OAUTH_CLIENT_ID in index.html before using GitHub login.", "error");
+    return;
+  }
+  const state = cryptoRandom();
+  const verifier = cryptoRandom() + cryptoRandom();
+  const challenge = await pkceChallenge(verifier);
+  sessionStorage.setItem("oauth_state", state);
+  sessionStorage.setItem("oauth_verifier", verifier);
+  const redirectUri = `${location.origin}${location.pathname}`;
+  const params = new URLSearchParams({
+    client_id: OAUTH_CLIENT_ID,
+    redirect_uri: redirectUri,
+    scope: OAUTH_SCOPE,
+    state,
+    code_challenge: challenge,
+    code_challenge_method: "S256",
+    allow_signup: "true"
+  });
+  location.href = `https://github.com/login/oauth/authorize?${params.toString()}`;
+}
+
+async function handleOAuthCallback() {
+  const params = new URLSearchParams(location.search);
+  const code = params.get("code");
+  const returnedState = params.get("state");
+  if (!code) return;
+  const expectedState = sessionStorage.getItem("oauth_state");
+  const codeVerifier = sessionStorage.getItem("oauth_verifier");
+  history.replaceState({}, document.title, location.pathname);
+  if (!expectedState || returnedState !== expectedState) {
+    setStatus("OAuth state mismatch. Sign-in was cancelled for safety.", "error");
+    return;
+  }
+  sessionStorage.removeItem("oauth_state");
+  sessionStorage.removeItem("oauth_verifier");
+  setStatus("Exchanging GitHub authorization code...", "loading");
+  try {
+    const res = await fetch("/api/github-oauth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        code,
+        code_verifier: codeVerifier,
+        redirect_uri: `${location.origin}${location.pathname}`
+      })
+    });
+    const payload = await res.json();
+    if (!res.ok) throw new Error(payload.error || "OAuth exchange failed.");
+    token = payload.access_token;
+    sessionStorage.setItem("github_token", token);
+    currentUser = await ghFetch("/user");
+    sessionStorage.setItem("github_user", JSON.stringify(currentUser));
+    updateAuthUi();
+    setStatus(`Signed in as ${currentUser.login}.`, "ok");
+  } catch (err) {
+    setStatus(err.message, "error");
+  }
+}
+
+function signOut() {
+  token = "";
+  currentUser = null;
+  sessionStorage.removeItem("github_token");
+  sessionStorage.removeItem("github_user");
+  updateAuthUi();
+}
+
+function updateAuthUi() {
+  signInBtn.style.display = token ? "none" : "";
+  signOutBtn.style.display = token ? "" : "none";
+  authState.textContent = token
+    ? `${currentUser?.login || "authenticated"}: 5,000 req/hour`
+    : "anonymous: 60 req/hour";
+}
+
+function cryptoRandom() {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return [...bytes].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function pkceChallenge(verifier) {
+  const bytes = new TextEncoder().encode(verifier);
+  const hash = await crypto.subtle.digest("SHA-256", bytes);
+  return btoa(String.fromCharCode(...new Uint8Array(hash)))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+repoModeBtn.addEventListener("click", () => setMode("repo"));
+orgModeBtn.addEventListener("click", () => setMode("org"));
+fetchBtn.addEventListener("click", () => mode === "repo" ? loadRepo() : loadOrg());
+targetInput.addEventListener("keydown", e => {
+  if (e.key === "Enter") mode === "repo" ? loadRepo() : loadOrg();
+});
+signInBtn.addEventListener("click", signIn);
+signOutBtn.addEventListener("click", signOut);
+</script>
+</body>
+</html>
