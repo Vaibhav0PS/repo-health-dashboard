@@ -242,6 +242,57 @@
     box-shadow: var(--shadow);
     overflow-x: auto;
   }
+  .insights {
+    display: grid;
+    grid-template-columns: 1.1fr repeat(3, 1fr);
+    gap: 12px;
+  }
+  .insight {
+    background: #fffdf8;
+    border: 3px solid var(--ink);
+    padding: 14px;
+    min-width: 0;
+  }
+  .insight.score { background: #ffef5c; }
+  .insight.warn { background: #ff9ed8; }
+  .insight.good { background: #98ff82; }
+  .insight.info { background: #78d7ff; }
+  .insight .k {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 900;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .insight .v {
+    font-family: var(--mono);
+    font-size: clamp(24px, 4vw, 42px);
+    line-height: 1;
+    font-weight: 900;
+  }
+  .insight .note {
+    margin-top: 10px;
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.35;
+  }
+  .meter {
+    height: 18px;
+    border: 3px solid var(--ink);
+    background: var(--panel);
+    margin-top: 12px;
+  }
+  .meter-fill {
+    height: 100%;
+    background: var(--add-bg);
+    border-right: 3px solid var(--ink);
+  }
+  .split-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
   table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 620px; }
   th {
     text-align: left;
@@ -281,10 +332,13 @@
     .mode-tabs { width: 100%; }
     .search-row { flex-direction: column; }
     .metrics { grid-template-columns: repeat(2, 1fr); }
+    .insights { grid-template-columns: 1fr 1fr; }
+    .split-grid { grid-template-columns: 1fr; }
     table { font-size: 12px; }
   }
   @media (max-width: 520px) {
     .metrics { grid-template-columns: 1fr; }
+    .insights { grid-template-columns: 1fr; }
     .auth { justify-content: flex-start; }
   }
 </style>
@@ -324,6 +378,16 @@
     <div class="metrics" id="metrics"></div>
 
     <div class="section">
+      <h2 id="analysisTitle">health analysis</h2>
+      <div class="panel" id="analysisPanel"></div>
+    </div>
+
+    <div class="section">
+      <h2 id="issueTitle">oldest open issues</h2>
+      <div class="panel" id="issuePanel"></div>
+    </div>
+
+    <div class="section">
       <h2 id="prTitle">oldest open pull requests</h2>
       <div class="panel" id="prPanel"></div>
     </div>
@@ -340,6 +404,11 @@
           <canvas id="contribChart" role="img" aria-label="Bar chart of top contributors by commit count"></canvas>
         </div>
       </div>
+    </div>
+
+    <div class="section">
+      <h2 id="inventoryTitle">repo inventory</h2>
+      <div class="panel" id="inventoryPanel"></div>
     </div>
   </div>
 </div>
@@ -365,14 +434,18 @@ const signInBtn = document.getElementById("signInBtn");
 const signOutBtn = document.getElementById("signOutBtn");
 const authState = document.getElementById("authState");
 const metrics = document.getElementById("metrics");
+const analysisPanel = document.getElementById("analysisPanel");
+const issuePanel = document.getElementById("issuePanel");
 const prPanel = document.getElementById("prPanel");
 const branchPanel = document.getElementById("branchPanel");
 const contribPanel = document.getElementById("contribPanel");
+const inventoryPanel = document.getElementById("inventoryPanel");
 
 let mode = "repo";
 let chartInstance = null;
 let token = sessionStorage.getItem("github_token") || "";
 let currentUser = JSON.parse(sessionStorage.getItem("github_user") || "null");
+let latestRate = null;
 
 clock.textContent = new Date().toISOString().slice(0, 16).replace("T", " ");
 updateAuthUi();
@@ -464,6 +537,11 @@ async function ghFetch(path) {
   const data = await res.json();
   data.__link = res.headers.get("link") || "";
   data.__rateRemaining = res.headers.get("x-ratelimit-remaining");
+  latestRate = {
+    limit: Number(res.headers.get("x-ratelimit-limit") || 0),
+    remaining: Number(res.headers.get("x-ratelimit-remaining") || 0),
+    reset: Number(res.headers.get("x-ratelimit-reset") || 0)
+  };
   return data;
 }
 
@@ -524,6 +602,15 @@ async function getContributors(slug, limit = 10) {
   return ghFetch(`/repos/${slug}/contributors?per_page=${limit}`).catch(() => []);
 }
 
+async function getOldIssues(slug, limit = 8) {
+  const issues = await ghFetch(`/repos/${slug}/issues?state=open&sort=created&direction=asc&per_page=${limit * 2}`).catch(() => []);
+  return issues.filter(issue => !issue.pull_request).slice(0, limit);
+}
+
+async function getLanguages(slug) {
+  return ghFetch(`/repos/${slug}/languages`).catch(() => ({}));
+}
+
 async function loadRepo() {
   const slug = parseRepoSlug(targetInput.value);
   if (!slug) {
@@ -535,10 +622,12 @@ async function loadRepo() {
   setStatus(`Fetching ${slug}...`, "loading");
 
   try {
-    const [repo, pullSummary, contributors] = await Promise.all([
+    const [repo, pullSummary, contributors, oldIssues, languages] = await Promise.all([
       ghFetch(`/repos/${slug}`),
       getOpenPullSummary(slug, 100),
-      getContributors(slug, 10)
+      getContributors(slug, 10),
+      getOldIssues(slug, 10),
+      getLanguages(slug)
     ]);
     const branchLimit = token ? AUTH_BRANCH_LIMIT : ANON_BRANCH_LIMIT;
     setStatus(`Checking up to ${branchLimit} non-default branches...`, "loading");
@@ -550,7 +639,9 @@ async function loadRepo() {
       openPrCount: pullSummary.count,
       pulls: pullSummary.oldest,
       branchSummary,
-      contributors
+      contributors,
+      oldIssues,
+      languages
     });
     setStatus("", "ok");
   } catch (err) {
@@ -583,25 +674,51 @@ async function loadOrg() {
       openIssues: 0,
       openPrs: 0,
       oldestPrs: [],
+      oldestIssues: [],
       staleRepos: [],
       contributors: new Map(),
-      branchesChecked: 0
+      branchesChecked: 0,
+      inactiveRepos: [],
+      archivedRepos: 0,
+      forkRepos: 0,
+      templateRepos: 0,
+      languageCounts: new Map(),
+      riskFlags: []
     };
     let done = 0;
     const branchLimit = token ? AUTH_BRANCH_LIMIT : ANON_BRANCH_LIMIT;
 
     await mapLimit(repos, ORG_REPO_CONCURRENCY, async repo => {
       const slug = repo.full_name;
-      const [pullSummary, branchSummary, contributors] = await Promise.all([
+      const [pullSummary, branchSummary, contributors, oldIssues] = await Promise.all([
         getOpenPullSummary(slug, 5).catch(() => ({ count: 0, oldest: [] })),
         getBranchStaleness(repo, branchLimit).catch(() => ({ checked: 0, totalNonDefault: 0, staleCount: 0, oldest: [] })),
-        getContributors(slug, 10)
+        getContributors(slug, 10),
+        getOldIssues(slug, 3)
       ]);
 
       totals.openPrs += pullSummary.count;
       totals.openIssues += Math.max(0, repo.open_issues_count - pullSummary.count);
       totals.oldestPrs.push(...pullSummary.oldest.map(pr => ({ ...pr, repo: slug })));
+      totals.oldestIssues.push(...oldIssues.map(issue => ({ ...issue, repo: slug })));
       totals.branchesChecked += branchSummary.checked;
+      totals.archivedRepos += repo.archived ? 1 : 0;
+      totals.forkRepos += repo.fork ? 1 : 0;
+      totals.templateRepos += repo.is_template ? 1 : 0;
+      if (repo.language) {
+        totals.languageCounts.set(repo.language, (totals.languageCounts.get(repo.language) || 0) + 1);
+      }
+      const inactiveDays = daysAgo(repo.pushed_at || repo.updated_at);
+      if (inactiveDays > 180) {
+        totals.inactiveRepos.push({
+          repo: slug,
+          days: inactiveDays,
+          archived: repo.archived,
+          fork: repo.fork,
+          openIssues: Math.max(0, repo.open_issues_count - pullSummary.count),
+          openPrs: pullSummary.count
+        });
+      }
       totals.staleRepos.push({
         repo: slug,
         staleCount: branchSummary.staleCount,
@@ -630,37 +747,266 @@ async function loadOrg() {
 
 function renderRepo(data) {
   dashboard.style.display = "block";
+  document.getElementById("analysisTitle").textContent = "health analysis";
+  document.getElementById("issueTitle").textContent = "oldest open issues";
   document.getElementById("prTitle").textContent = "oldest open pull requests";
   document.getElementById("branchTitle").textContent = "branch staleness";
   document.getElementById("contribTitle").textContent = "top contributors";
+  document.getElementById("inventoryTitle").textContent = "repo inventory";
+  const health = scoreRepoHealth(data);
   metrics.innerHTML = `
-    <div class="metric"><div class="label">Stars</div><div class="value">${fmt(data.repo.stargazers_count)}</div></div>
+    <div class="metric"><div class="label">Health score</div><div class="value">${health.score}</div></div>
     <div class="metric"><div class="label">Open issues</div><div class="value">${fmt(data.openIssueCount)}</div></div>
     <div class="metric"><div class="label">Open PRs</div><div class="value">${fmt(data.openPrCount)}</div></div>
-    <div class="metric"><div class="label">Branches checked</div><div class="value">${fmt(data.branchSummary.checked)}</div></div>
+    <div class="metric"><div class="label">Stars</div><div class="value">${fmt(data.repo.stargazers_count)}</div></div>
   `;
+  renderAnalysis(health, repoInsights(data, health));
+  renderIssues(data.oldIssues, false);
   renderPulls(data.pulls, false);
   renderBranches(data.branchSummary.oldest, data.branchSummary, false);
   renderContributors(data.contributors);
+  renderRepoInventory(data);
 }
 
 function renderOrg(org, totals) {
   dashboard.style.display = "block";
+  document.getElementById("analysisTitle").textContent = "org health analysis";
+  document.getElementById("issueTitle").textContent = "oldest open issues org-wide";
   document.getElementById("prTitle").textContent = "oldest open pull requests org-wide";
   document.getElementById("branchTitle").textContent = "repos with stale branches";
   document.getElementById("contribTitle").textContent = "most active contributors org-wide";
+  document.getElementById("inventoryTitle").textContent = "org inventory";
+  const health = scoreOrgHealth(totals);
   metrics.innerHTML = `
-    <div class="metric"><div class="label">Repos scanned</div><div class="value">${fmt(totals.repos)}</div></div>
+    <div class="metric"><div class="label">Org score</div><div class="value">${health.score}</div></div>
     <div class="metric"><div class="label">Open issues</div><div class="value">${fmt(totals.openIssues)}</div></div>
     <div class="metric"><div class="label">Open PRs</div><div class="value">${fmt(totals.openPrs)}</div></div>
-    <div class="metric"><div class="label">Branches checked</div><div class="value">${fmt(totals.branchesChecked)}</div></div>
+    <div class="metric"><div class="label">Repos scanned</div><div class="value">${fmt(totals.repos)}</div></div>
   `;
+  renderAnalysis(health, orgInsights(totals, health));
+  renderIssues(totals.oldestIssues.sort((a, b) => daysAgo(b.created_at) - daysAgo(a.created_at)).slice(0, 12), true);
   const oldest = totals.oldestPrs
     .sort((a, b) => daysAgo(b.created_at) - daysAgo(a.created_at))
     .slice(0, 12);
   renderPulls(oldest, true);
   renderStaleRepos(totals.staleRepos);
   renderContributors([...totals.contributors.values()].sort((a, b) => b.contributions - a.contributions).slice(0, 12));
+  renderOrgInventory(totals);
+}
+
+function scoreRepoHealth(data) {
+  const oldestPr = Math.max(0, ...data.pulls.map(p => daysAgo(p.created_at)));
+  const oldestIssue = Math.max(0, ...data.oldIssues.map(i => daysAgo(i.created_at)));
+  const staleBranches = data.branchSummary.staleCount;
+  const inactiveDays = daysAgo(data.repo.pushed_at || data.repo.updated_at);
+  const contributorCount = data.contributors.length;
+  const isDormantEmptyRepo = inactiveDays > 180
+    && data.repo.stargazers_count === 0
+    && data.openIssueCount === 0
+    && data.openPrCount === 0;
+  let score = 100;
+  score -= Math.min(25, Math.floor(oldestPr / 10));
+  score -= Math.min(20, Math.floor(oldestIssue / 14));
+  score -= Math.min(20, staleBranches * 5);
+  score -= inactivityPenalty(inactiveDays);
+  score -= data.repo.archived ? 35 : 0;
+  score -= data.openPrCount > 50 ? 12 : data.openPrCount > 15 ? 6 : 0;
+  score -= contributorCount === 0 ? 10 : 0;
+  score -= isDormantEmptyRepo ? 15 : 0;
+  return {
+    score: clamp(score, 0, 100),
+    grade: healthGrade(score),
+    oldestPr,
+    oldestIssue,
+    staleBranches,
+    inactiveDays,
+    contributorCount,
+    isDormantEmptyRepo
+  };
+}
+
+function inactivityPenalty(days) {
+  if (days > 365) return 45;
+  if (days > 180) return 30;
+  if (days > 90) return 15;
+  if (days > 45) return 6;
+  return 0;
+}
+
+function scoreOrgHealth(totals) {
+  const oldestPr = Math.max(0, ...totals.oldestPrs.map(p => daysAgo(p.created_at)));
+  const oldestIssue = Math.max(0, ...totals.oldestIssues.map(i => daysAgo(i.created_at)));
+  const staleRepos = totals.staleRepos.filter(r => r.staleCount > 0).length;
+  const inactiveRepos = totals.inactiveRepos.length;
+  const repoCount = Math.max(1, totals.repos);
+  let score = 100;
+  score -= Math.min(25, Math.floor(oldestPr / 21));
+  score -= Math.min(20, Math.floor(oldestIssue / 30));
+  score -= Math.min(20, Math.round((staleRepos / repoCount) * 60));
+  score -= Math.min(18, Math.round((inactiveRepos / repoCount) * 45));
+  score -= Math.min(12, Math.round((totals.archivedRepos / repoCount) * 40));
+  return {
+    score: clamp(score, 0, 100),
+    grade: healthGrade(score),
+    oldestPr,
+    oldestIssue,
+    staleRepos,
+    inactiveRepos
+  };
+}
+
+function healthGrade(score) {
+  const n = clamp(score, 0, 100);
+  if (n >= 85) return "solid";
+  if (n >= 70) return "healthy";
+  if (n >= 50) return "watch";
+  if (n >= 30) return "risk";
+  return "critical";
+}
+
+function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function repoInsights(data, health) {
+  const flags = [];
+  if (data.repo.archived) flags.push("Repository is archived.");
+  if (data.repo.fork) flags.push("Repository is a fork.");
+  if (health.oldestPr > 90) flags.push(`Oldest open PR is ${health.oldestPr} days old.`);
+  if (health.oldestIssue > 180) flags.push(`Oldest open issue is ${health.oldestIssue} days old.`);
+  if (health.staleBranches > 0) flags.push(`${health.staleBranches} checked branches are stale.`);
+  if (health.inactiveDays > 180) flags.push(`Default activity looks quiet: last push was ${health.inactiveDays} days ago.`);
+  if (health.contributorCount === 0) flags.push("No contributor data was returned.");
+  if (health.isDormantEmptyRepo) flags.push("Dormant repo with no stars, open issues, or open PRs.");
+  if (flags.length === 0) flags.push("No major repo hygiene flags in the sampled data.");
+  return [
+    { kind: "warn", label: "Risk flags", value: flags.length, note: flags.slice(0, 2).join(" ") },
+    { kind: "info", label: "Last push", value: `${health.inactiveDays}d`, note: data.repo.default_branch ? `Default branch: ${data.repo.default_branch}` : "Default branch unavailable" },
+    { kind: "good", label: "API budget", value: latestRate?.remaining ? fmt(latestRate.remaining) : "-", note: latestRate?.limit ? `${fmt(latestRate.limit)} request/hour limit` : "Rate headers unavailable" }
+  ];
+}
+
+function orgInsights(totals, health) {
+  const repoCount = Math.max(1, totals.repos);
+  return [
+    { kind: "warn", label: "Inactive repos", value: fmt(health.inactiveRepos), note: `${Math.round((health.inactiveRepos / repoCount) * 100)}% have no pushes in 180+ days.` },
+    { kind: "info", label: "Stale branch repos", value: fmt(health.staleRepos), note: `${Math.round((health.staleRepos / repoCount) * 100)}% had stale checked branches.` },
+    { kind: "good", label: "API budget", value: latestRate?.remaining ? fmt(latestRate.remaining) : "-", note: latestRate?.limit ? `${fmt(latestRate.limit)} request/hour limit` : "Rate headers unavailable" }
+  ];
+}
+
+function renderAnalysis(health, cards) {
+  analysisPanel.innerHTML = `
+    <div class="insights">
+      <div class="insight score">
+        <div class="k">Health score</div>
+        <div class="v">${health.score}/100</div>
+        <div class="meter"><div class="meter-fill" style="width:${health.score}%; background:${scoreColor(health.score)};"></div></div>
+        <div class="note">${health.grade.toUpperCase()} based on PR age, issue age, branch staleness, and activity.</div>
+      </div>
+      ${cards.map(card => `
+        <div class="insight ${card.kind}">
+          <div class="k">${escapeHtml(card.label)}</div>
+          <div class="v">${escapeHtml(card.value)}</div>
+          <div class="note">${escapeHtml(card.note)}</div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function scoreColor(score) {
+  if (score >= 85) return "#7cff9b";
+  if (score >= 70) return "#ffd84d";
+  if (score >= 50) return "#ff9ed8";
+  return "#ff5d5d";
+}
+
+function renderIssues(issues, showRepo) {
+  if (!issues || issues.length === 0) {
+    issuePanel.innerHTML = '<div class="empty">No open issues found in the sampled data.</div>';
+    return;
+  }
+  issuePanel.innerHTML = `
+    <table>
+      <tr>${showRepo ? "<th>Repo</th>" : ""}<th>Issue</th><th>Author</th><th>Age</th></tr>
+      ${issues.map(issue => {
+        const age = daysAgo(issue.created_at);
+        const cls = age > 180 ? "stale" : age > 60 ? "old" : "ok";
+        return `<tr>
+          ${showRepo ? `<td class="repo-name">${escapeHtml(issue.repo)}</td>` : ""}
+          <td><a href="${issue.html_url}" target="_blank" rel="noopener">#${issue.number}</a> ${escapeHtml(issue.title).slice(0, 72)}</td>
+          <td>${issue.user ? escapeHtml(issue.user.login) : "-"}</td>
+          <td><span class="pill ${cls}">${age}d</span></td>
+        </tr>`;
+      }).join("")}
+    </table>
+  `;
+}
+
+function renderRepoInventory(data) {
+  const langs = Object.entries(data.languages)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8);
+  const totalBytes = langs.reduce((sum, [, bytes]) => sum + bytes, 0) || 1;
+  inventoryPanel.innerHTML = `
+    <div class="split-grid">
+      <div>
+        <table>
+          <tr><th>Fact</th><th>Value</th></tr>
+          <tr><td>Default branch</td><td>${escapeHtml(data.repo.default_branch || "-")}</td></tr>
+          <tr><td>Visibility</td><td>${data.repo.private ? "private" : "public"}</td></tr>
+          <tr><td>Fork / archived</td><td>${data.repo.fork ? "fork" : "source"} / ${data.repo.archived ? "archived" : "active"}</td></tr>
+          <tr><td>Last push</td><td>${daysAgo(data.repo.pushed_at || data.repo.updated_at)}d ago</td></tr>
+          <tr><td>Watchers</td><td>${fmt(data.repo.subscribers_count || data.repo.watchers_count)}</td></tr>
+        </table>
+      </div>
+      <div>
+        ${langs.length ? `<table>
+          <tr><th>Language</th><th>Share</th></tr>
+          ${langs.map(([name, bytes]) => `<tr><td>${escapeHtml(name)}</td><td><span class="pill info">${Math.round((bytes / totalBytes) * 100)}%</span></td></tr>`).join("")}
+        </table>` : '<div class="empty">Language data unavailable.</div>'}
+      </div>
+    </div>
+  `;
+}
+
+function renderOrgInventory(totals) {
+  const languages = [...totals.languageCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8);
+  const inactive = totals.inactiveRepos.sort((a, b) => b.days - a.days).slice(0, 8);
+  inventoryPanel.innerHTML = `
+    <div class="split-grid">
+      <div>
+        <table>
+          <tr><th>Org fact</th><th>Value</th></tr>
+          <tr><td>Archived repos</td><td>${fmt(totals.archivedRepos)}</td></tr>
+          <tr><td>Fork repos</td><td>${fmt(totals.forkRepos)}</td></tr>
+          <tr><td>Template repos</td><td>${fmt(totals.templateRepos)}</td></tr>
+          <tr><td>Inactive 180d+</td><td>${fmt(totals.inactiveRepos.length)}</td></tr>
+          <tr><td>Branches checked</td><td>${fmt(totals.branchesChecked)}</td></tr>
+        </table>
+      </div>
+      <div>
+        ${languages.length ? `<table>
+          <tr><th>Primary language</th><th>Repos</th></tr>
+          ${languages.map(([name, count]) => `<tr><td>${escapeHtml(name)}</td><td><span class="pill info">${fmt(count)}</span></td></tr>`).join("")}
+        </table>` : '<div class="empty">Primary language data unavailable.</div>'}
+      </div>
+    </div>
+    ${inactive.length ? `<div style="margin-top:14px;">
+      <table>
+        <tr><th>Inactive repo</th><th>Last push</th><th>Open issues</th><th>Open PRs</th></tr>
+        ${inactive.map(repo => `<tr>
+          <td class="repo-name">${escapeHtml(repo.repo)}</td>
+          <td><span class="pill ${repo.days > 365 ? "stale" : "old"}">${repo.days}d ago</span></td>
+          <td>${fmt(repo.openIssues)}</td>
+          <td>${fmt(repo.openPrs)}</td>
+        </tr>`).join("")}
+      </table>
+    </div>` : ""}
+  `;
 }
 
 function renderPulls(pulls, showRepo) {
